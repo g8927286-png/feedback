@@ -7,15 +7,18 @@ administrador da instituição.
 """
 
 import os
+import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from sqlalchemy import func
+from sqlalchemy import func, text
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.utils import secure_filename
 
 # ---------------------------------------------------------------------------
 # Configuração
@@ -26,6 +29,8 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 app = Flask(__name__)
 
+DB_PATH = os.path.join(BASE_DIR, "feedback.db")
+
 database_url = os.environ.get("DATABASE_URL")
 if database_url:
     if database_url.startswith("postgres://"):
@@ -34,8 +39,12 @@ if database_url:
         database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 else:
-    DB_PATH = os.path.join(BASE_DIR, "feedback.db")
     app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
+
+UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+ALLOWED_AUDIO_EXT = {"wav", "mp3", "m4a", "ogg", "webm", "aac"}
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -83,6 +92,7 @@ class Feedback(db.Model):
     rating = db.Column(db.Integer, nullable=False)
     message = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    audio_filename = db.Column(db.String(260), nullable=True)
 
     def to_dict(self):
         return {
@@ -93,11 +103,31 @@ class Feedback(db.Model):
             "rating": self.rating,
             "message": self.message,
             "created_at": self.created_at.replace(tzinfo=timezone.utc).isoformat(),
+            "audio_url": f"/uploads/{self.audio_filename}" if self.audio_filename else None,
         }
 
 
 with app.app_context():
     db.create_all()
+
+    try:
+        if db.engine.dialect.name == "sqlite":
+            conn = sqlite3.connect(DB_PATH)
+            try:
+                cols = [row[1] for row in conn.execute("PRAGMA table_info(feedback)").fetchall()]
+                if "audio_filename" not in cols:
+                    conn.execute("ALTER TABLE feedback ADD COLUMN audio_filename TEXT")
+                    conn.commit()
+            finally:
+                conn.close()
+        else:
+            inspector = db.inspect(db.engine)
+            cols = [column["name"] for column in inspector.get_columns("feedback")]
+            if "audio_filename" not in cols:
+                db.session.execute(text("ALTER TABLE feedback ADD COLUMN audio_filename VARCHAR(260)"))
+                db.session.commit()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -187,13 +217,47 @@ def get_categories():
 
 @app.post("/api/feedback")
 def create_feedback():
-    data = request.get_json(silent=True) or {}
+    if request.content_type and "multipart/form-data" in request.content_type:
+        form = request.form or {}
+        form_data = dict(form)
+        if "rating" in form_data:
+            try:
+                form_data["rating"] = int(form_data["rating"])
+            except Exception:
+                pass
+        data = form_data
+    else:
+        data = request.get_json(silent=True) or {}
 
     errors, clean = validate_feedback_payload(data)
     if errors:
         return jsonify({"errors": errors}), 400
 
-    feedback = Feedback(**clean)
+    audio_file = request.files.get("audio") if hasattr(request, "files") else None
+    if audio_file and audio_file.filename:
+        filename = secure_filename(audio_file.filename)
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext in ALLOWED_AUDIO_EXT:
+            unique_filename = f"{int(time.time() * 1000)}_{filename}"
+            save_path = os.path.join(app.config["UPLOAD_FOLDER"], unique_filename)
+            try:
+                audio_file.save(save_path)
+                clean["audio_filename"] = unique_filename
+            except Exception:
+                pass
+
+    try:
+        if db.engine.dialect.name == "sqlite":
+            rows = db.session.execute("PRAGMA table_info(feedback)").all()
+            db_cols = {row[1] for row in rows}
+        else:
+            inspector = db.inspect(db.engine)
+            db_cols = {column["name"] for column in inspector.get_columns("feedback")}
+    except Exception:
+        db_cols = {column.name for column in Feedback.__table__.columns}
+
+    model_kwargs = {k: v for k, v in clean.items() if k in db_cols}
+    feedback = Feedback(**model_kwargs)
     db.session.add(feedback)
     try:
         db.session.commit()
@@ -205,6 +269,11 @@ def create_feedback():
         )
 
     return jsonify({"message": "Obrigado pelo seu feedback!", "feedback": feedback.to_dict()}), 201
+
+
+@app.get("/uploads/<path:filename>")
+def uploaded_file(filename):
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
 
 # ---------------------------------------------------------------------------

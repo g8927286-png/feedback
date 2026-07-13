@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
-import { ApiError, getCategories, submitFeedback } from "../api";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { ApiError, getCategories, submitFeedback, submitFeedbackForm } from "../api";
 import StarRating from "./StarRating";
 
 interface FeedbackFormProps {
@@ -25,6 +25,11 @@ export default function FeedbackForm({ onSuccess, onError }: FeedbackFormProps) 
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [audioURL, setAudioURL] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
     getCategories()
@@ -57,12 +62,27 @@ export default function FeedbackForm({ onSuccess, onError }: FeedbackFormProps) 
 
     setSubmitting(true);
     try {
-      await submitFeedback({ name, email, category, rating, message });
+      if (audioBlob) {
+        const formData = new FormData();
+        formData.append("name", name);
+        formData.append("email", email);
+        formData.append("category", category);
+        formData.append("rating", String(rating));
+        formData.append("message", message);
+        const filename = `feedback_${Date.now()}.webm`;
+        const file = new File([audioBlob], filename, { type: audioBlob.type || "audio/webm" });
+        formData.append("audio", file);
+        await submitFeedbackForm(formData);
+      } else {
+        await submitFeedback({ name, email, category, rating, message });
+      }
       setName("");
       setEmail("");
       setCategory(categories[0]);
       setRating(0);
       setMessage("");
+      setAudioBlob(null);
+      setAudioURL(null);
       onSuccess();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -74,6 +94,38 @@ export default function FeedbackForm({ onSuccess, onError }: FeedbackFormProps) 
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        setAudioBlob(blob);
+        setAudioURL(URL.createObjectURL(blob));
+        stream.getTracks().forEach((track) => track.stop());
+      };
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      onError("Não foi possível aceder ao microfone. Verifique as permissões.");
+    }
+  }
+
+  function stopRecording() {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+    }
+    setIsRecording(false);
   }
 
   return (
@@ -171,6 +223,31 @@ export default function FeedbackForm({ onSuccess, onError }: FeedbackFormProps) 
       </div>
 
       <div className="mt-7">
+        <div className="mb-4">
+          <label className="mb-2 block text-sm font-medium text-navy">Gravar áudio (opcional)</label>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            {!isRecording ? (
+              <button
+                type="button"
+                onClick={startRecording}
+                className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white"
+              >
+                Iniciar gravação
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={stopRecording}
+                className="rounded-xl bg-brick px-4 py-2 text-sm font-medium text-white"
+              >
+                Parar
+              </button>
+            )}
+            {audioURL && (
+              <audio src={audioURL} controls className="max-w-[240px]" />
+            )}
+          </div>
+        </div>
         <button
           type="submit"
           disabled={submitting}
