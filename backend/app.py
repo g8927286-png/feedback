@@ -271,6 +271,8 @@ def create_feedback():
         db_cols = {c.name for c in Feedback.__table__.columns}
 
     model_kwargs = {k: v for k, v in clean.items() if k in db_cols}
+    print("[create_feedback] db_cols:", db_cols)
+    print("[create_feedback] model_kwargs:", model_kwargs)
     feedback = Feedback(**model_kwargs)
     db.session.add(feedback)
     try:
