@@ -10,12 +10,14 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory, url_for
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.utils import secure_filename
+import time
 
 # ---------------------------------------------------------------------------
 # Configuração
@@ -25,6 +27,12 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 app = Flask(__name__)
+
+# Uploads
+UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+ALLOWED_AUDIO_EXT = {"wav", "mp3", "m4a", "ogg", "webm", "aac"}
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 database_url = os.environ.get("DATABASE_URL")
 if database_url:
@@ -83,6 +91,7 @@ class Feedback(db.Model):
     rating = db.Column(db.Integer, nullable=False)
     message = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    audio_filename = db.Column(db.String(260), nullable=True)
 
     def to_dict(self):
         return {
@@ -93,6 +102,7 @@ class Feedback(db.Model):
             "rating": self.rating,
             "message": self.message,
             "created_at": self.created_at.replace(tzinfo=timezone.utc).isoformat(),
+            "audio_url": f"/uploads/{self.audio_filename}" if self.audio_filename else None,
         }
 
 
@@ -181,10 +191,36 @@ def get_categories():
 
 @app.post("/api/feedback")
 def create_feedback():
-    data = request.get_json(silent=True) or {}
+    # Support JSON and multipart/form-data (with optional audio file)
+    if request.content_type and "multipart/form-data" in request.content_type:
+        form = request.form or {}
+        # convert rating to int when possible
+        if "rating" in form:
+            try:
+                form_data = dict(form)
+                form_data["rating"] = int(form["rating"])
+            except Exception:
+                form_data = dict(form)
+        else:
+            form_data = dict(form)
+        data = form_data
+    else:
+        data = request.get_json(silent=True) or {}
+
     errors, clean = validate_feedback_payload(data)
     if errors:
         return jsonify({"errors": errors}), 400
+
+    # Handle audio file if present
+    audio_file = request.files.get("audio") if hasattr(request, "files") else None
+    if audio_file and audio_file.filename:
+        filename = secure_filename(audio_file.filename)
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext in ALLOWED_AUDIO_EXT:
+            unique = f"{int(time.time()*1000)}_{filename}"
+            save_path = os.path.join(app.config["UPLOAD_FOLDER"], unique)
+            audio_file.save(save_path)
+            clean["audio_filename"] = unique
 
     feedback = Feedback(**clean)
     db.session.add(feedback)
@@ -300,3 +336,8 @@ def stats():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=False, host="0.0.0.0", port=port)
+
+
+@app.get("/uploads/<path:filename>")
+def uploaded_file(filename):
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
