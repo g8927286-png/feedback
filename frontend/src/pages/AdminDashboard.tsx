@@ -268,11 +268,6 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                     </div>
                   </div>
                   <p className="mt-3 text-sm leading-relaxed text-ink/85">{item.message}</p>
-                  {item.audio_url && (
-                    <div className="mt-3">
-                      <audio src={item.audio_url} controls className="w-full max-w-lg" />
-                    </div>
-                  )}
                   {(item.name || item.email) && (
                     <p className="mt-2 text-xs text-ink/40">
                       {[item.name, item.email].filter(Boolean).join(" · ")}

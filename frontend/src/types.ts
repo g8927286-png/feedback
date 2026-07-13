@@ -6,7 +6,6 @@ export interface Feedback {
   rating: number;
   message: string;
   created_at: string;
-  audio_url?: string | null;
 }
 
 export interface Stats {

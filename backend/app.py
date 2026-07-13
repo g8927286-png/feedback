@@ -10,14 +10,12 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory, url_for
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func
 from werkzeug.security import check_password_hash, generate_password_hash
-from werkzeug.utils import secure_filename
-import time
 
 # ---------------------------------------------------------------------------
 # Configuração
@@ -27,12 +25,6 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 app = Flask(__name__)
-
-# Uploads
-UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-ALLOWED_AUDIO_EXT = {"wav", "mp3", "m4a", "ogg", "webm", "aac"}
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 database_url = os.environ.get("DATABASE_URL")
 if database_url:
@@ -91,7 +83,6 @@ class Feedback(db.Model):
     rating = db.Column(db.Integer, nullable=False)
     message = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
-    audio_filename = db.Column(db.String(260), nullable=True)
 
     def to_dict(self):
         return {
@@ -102,29 +93,11 @@ class Feedback(db.Model):
             "rating": self.rating,
             "message": self.message,
             "created_at": self.created_at.replace(tzinfo=timezone.utc).isoformat(),
-            "audio_url": f"/uploads/{self.audio_filename}" if self.audio_filename else None,
         }
 
 
 with app.app_context():
     db.create_all()
-    # Ensure `audio_filename` column exists (for existing SQLite DBs without migrations)
-    try:
-        inspector = db.inspect(db.engine)
-        cols = [c['name'] for c in inspector.get_columns('feedback')]
-        if 'audio_filename' not in cols:
-            try:
-                print('[startup] adding audio_filename column to feedback table')
-                if db.engine.dialect.name == 'sqlite':
-                    db.engine.execute('ALTER TABLE feedback ADD COLUMN audio_filename VARCHAR(260)')
-                else:
-                    db.engine.execute('ALTER TABLE feedback ADD COLUMN audio_filename VARCHAR(260)')
-                print('[startup] audio_filename column added')
-            except Exception:
-                print('[startup] failed to add audio_filename column; continuing')
-    except Exception:
-        # If inspection fails, ignore — application can still run and create models for new DBs
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -214,87 +187,17 @@ def get_categories():
 
 @app.post("/api/feedback")
 def create_feedback():
-    # Support JSON and multipart/form-data (with optional audio file)
-    if request.content_type and "multipart/form-data" in request.content_type:
-        form = request.form or {}
-        # convert rating to int when possible
-        if "rating" in form:
-            try:
-                form_data = dict(form)
-                form_data["rating"] = int(form["rating"])
-            except Exception:
-                form_data = dict(form)
-        else:
-            form_data = dict(form)
-        data = form_data
-    else:
-        data = request.get_json(silent=True) or {}
-
-    # Debugging: log incoming payload
-    print("[create_feedback] incoming data:", data)
-    if hasattr(request, "files"):
-        print("[create_feedback] files:", list(request.files.keys()))
+    data = request.get_json(silent=True) or {}
 
     errors, clean = validate_feedback_payload(data)
     if errors:
         return jsonify({"errors": errors}), 400
 
-    # Handle audio file if present
-    audio_file = request.files.get("audio") if hasattr(request, "files") else None
-    if audio_file and audio_file.filename:
-        filename = secure_filename(audio_file.filename)
-        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        if ext in ALLOWED_AUDIO_EXT:
-            unique = f"{int(time.time()*1000)}_{filename}"
-            save_path = os.path.join(app.config["UPLOAD_FOLDER"], unique)
-            try:
-                audio_file.save(save_path)
-                clean["audio_filename"] = unique
-            except Exception:
-                import traceback
-
-                traceback.print_exc()
-                # don't fail the whole request just because audio couldn't be saved
-                print(f"[create_feedback] failed to save audio to {save_path}")
-
-    # Create model only with actual DB columns (handles existing DB without migrations)
-    try:
-        if db.engine.dialect.name == "sqlite":
-            # pragma returns rows: (cid, name, type, notnull, dflt_value, pk)
-            rows = db.session.execute("PRAGMA table_info(feedback)").all()
-            db_cols = {r[1] for r in rows}
-        else:
-            inspector = db.inspect(db.engine)
-            db_cols = {c["name"] for c in inspector.get_columns("feedback")}
-    except Exception:
-        # fallback to model columns if inspection fails
-        db_cols = {c.name for c in Feedback.__table__.columns}
-
-    model_kwargs = {k: v for k, v in clean.items() if k in db_cols}
-    print("[create_feedback] db_cols:", db_cols)
-    print("[create_feedback] model_kwargs:", model_kwargs)
-    feedback = Feedback(**model_kwargs)
+    feedback = Feedback(**clean)
     db.session.add(feedback)
     try:
         db.session.commit()
-    except Exception as e:
-        import traceback
-
-        traceback.print_exc()
-        # If failure due to missing audio_filename column, attempt to add column and retry once
-        msg = str(e).lower()
-        if "audio_filename" in msg or "no column named audio_filename" in msg:
-            try:
-                print("[create_feedback] adding missing column audio_filename and retrying commit")
-                if db.engine.dialect.name == "sqlite":
-                    db.session.execute('ALTER TABLE feedback ADD COLUMN audio_filename VARCHAR(260)')
-                else:
-                    db.session.execute('ALTER TABLE feedback ADD COLUMN audio_filename VARCHAR(260)')
-                db.session.commit()
-                return jsonify({"message": "Obrigado pelo seu feedback!", "feedback": feedback.to_dict()}), 201
-            except Exception:
-                traceback.print_exc()
-
+    except Exception:
         db.session.rollback()
         return (
             jsonify({"error": "Erro interno ao gravar feedback. Verifique os logs do servidor."}),
@@ -413,6 +316,3 @@ if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=port)
 
 
-@app.get("/uploads/<path:filename>")
-def uploaded_file(filename):
-    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
