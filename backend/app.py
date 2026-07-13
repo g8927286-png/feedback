@@ -9,6 +9,7 @@ administrador da instituição.
 import os
 from datetime import datetime, timedelta, timezone
 
+from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -21,10 +22,17 @@ from werkzeug.security import check_password_hash, generate_password_hash
 # ---------------------------------------------------------------------------
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-DB_PATH = os.path.join(BASE_DIR, "feedback.db")
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 app = Flask(__name__)
-app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
+
+database_url = os.environ.get("DATABASE_URL")
+if database_url:
+    app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+else:
+    DB_PATH = os.path.join(BASE_DIR, "feedback.db")
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
+
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # Segredo usado para assinar os tokens de sessão do administrador.
