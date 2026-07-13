@@ -257,9 +257,15 @@ def create_feedback():
                 # don't fail the whole request just because audio couldn't be saved
                 print(f"[create_feedback] failed to save audio to {save_path}")
 
-    # Create model only with known columns (handles existing DB without migrations)
-    known_cols = {c.name for c in Feedback.__table__.columns}
-    model_kwargs = {k: v for k, v in clean.items() if k in known_cols}
+    # Create model only with actual DB columns (handles existing DB without migrations)
+    try:
+        inspector = db.inspect(db.engine)
+        db_cols = {c["name"] for c in inspector.get_columns("feedback")}
+    except Exception:
+        # fallback to model columns if inspection fails
+        db_cols = {c.name for c in Feedback.__table__.columns}
+
+    model_kwargs = {k: v for k, v in clean.items() if k in db_cols}
     feedback = Feedback(**model_kwargs)
     db.session.add(feedback)
     try:
