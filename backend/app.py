@@ -207,6 +207,11 @@ def create_feedback():
     else:
         data = request.get_json(silent=True) or {}
 
+    # Debugging: log incoming payload
+    print("[create_feedback] incoming data:", data)
+    if hasattr(request, "files"):
+        print("[create_feedback] files:", list(request.files.keys()))
+
     errors, clean = validate_feedback_payload(data)
     if errors:
         return jsonify({"errors": errors}), 400
@@ -219,8 +224,15 @@ def create_feedback():
         if ext in ALLOWED_AUDIO_EXT:
             unique = f"{int(time.time()*1000)}_{filename}"
             save_path = os.path.join(app.config["UPLOAD_FOLDER"], unique)
-            audio_file.save(save_path)
-            clean["audio_filename"] = unique
+            try:
+                audio_file.save(save_path)
+                clean["audio_filename"] = unique
+            except Exception:
+                import traceback
+
+                traceback.print_exc()
+                # don't fail the whole request just because audio couldn't be saved
+                print(f"[create_feedback] failed to save audio to {save_path}")
 
     # Create model only with known columns (handles existing DB without migrations)
     known_cols = {c.name for c in Feedback.__table__.columns}
