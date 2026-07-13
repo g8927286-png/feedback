@@ -26,4 +26,4 @@ services:
       - key: VITE_API_URL
         value: "https://<YOUR-BACKEND-NAME>.onrender.com/api"
       - key: DATABASE_URL
-        value: "postgresql://feedback_bd_user:J5QPTaAIBU51kfYmtrYq8RnXNThlwRHo@dpg-d9ac01rtqb8s73bq7cng-a.virginia-postgres.render.com/feedback_bd"
+        value: "postgresql+psycopg://feedback_bd_user:J5QPTaAIBU51kfYmtrYq8RnXNThlwRHo@dpg-d9ac01rtqb8s73bq7cng-a.virginia-postgres.render.com/feedback_bd"
