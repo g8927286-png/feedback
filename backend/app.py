@@ -108,6 +108,23 @@ class Feedback(db.Model):
 
 with app.app_context():
     db.create_all()
+    # Ensure `audio_filename` column exists (for existing SQLite DBs without migrations)
+    try:
+        inspector = db.inspect(db.engine)
+        cols = [c['name'] for c in inspector.get_columns('feedback')]
+        if 'audio_filename' not in cols:
+            try:
+                print('[startup] adding audio_filename column to feedback table')
+                if db.engine.dialect.name == 'sqlite':
+                    db.engine.execute('ALTER TABLE feedback ADD COLUMN audio_filename VARCHAR(260)')
+                else:
+                    db.engine.execute('ALTER TABLE feedback ADD COLUMN audio_filename VARCHAR(260)')
+                print('[startup] audio_filename column added')
+            except Exception:
+                print('[startup] failed to add audio_filename column; continuing')
+    except Exception:
+        # If inspection fails, ignore — application can still run and create models for new DBs
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +155,14 @@ def require_admin(fn):
 
 def validate_feedback_payload(data):
     errors = {}
-
     rating = data.get("rating")
+    # Try to coerce numeric rating strings to int
+    try:
+        if rating is not None and not isinstance(rating, int):
+            rating = int(rating)
+    except Exception:
+        rating = None
+
     if not isinstance(rating, int) or not (1 <= rating <= 5):
         errors["rating"] = "A classificação deve ser um número inteiro entre 1 e 5."
 
