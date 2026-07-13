@@ -281,6 +281,20 @@ def create_feedback():
         import traceback
 
         traceback.print_exc()
++        # If failure due to missing audio_filename column, attempt to add column and retry once
++        msg = str(e).lower()
++        if "audio_filename" in msg or "no column named audio_filename" in msg:
++            try:
++                print("[create_feedback] adding missing column audio_filename and retrying commit")
++                if db.engine.dialect.name == "sqlite":
++                    db.session.execute('ALTER TABLE feedback ADD COLUMN audio_filename VARCHAR(260)')
++                else:
++                    db.session.execute('ALTER TABLE feedback ADD COLUMN audio_filename VARCHAR(260)')
++                db.session.commit()
++                return jsonify({"message": "Obrigado pelo seu feedback!", "feedback": feedback.to_dict()}), 201
++            except Exception:
++                traceback.print_exc()
++
         db.session.rollback()
         return (
             jsonify({"error": "Erro interno ao gravar feedback. Verifique os logs do servidor."}),
