@@ -165,6 +165,15 @@ def health():
     return jsonify({"status": "ok", "institution": INSTITUTION_NAME})
 
 
+@app.get("/")
+def index():
+    return jsonify({
+        "status": "welcome",
+        "message": "Feedback backend is running. Use /api/health or /api/feedback.",
+        "documentation": "/api/health"
+    })
+
+
 @app.get("/api/categories")
 def get_categories():
     return jsonify({"categories": CATEGORIES})
