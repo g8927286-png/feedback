@@ -26,4 +26,4 @@ services:
     publishPath: frontend/dist
     envVars:
       - key: VITE_API_URL
-        value: "https://<YOUR-BACKEND-NAME>.onrender.com/api"
+        value: "https://feedback-institucional-backend.onrender.com/api"
