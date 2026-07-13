@@ -259,8 +259,13 @@ def create_feedback():
 
     # Create model only with actual DB columns (handles existing DB without migrations)
     try:
-        inspector = db.inspect(db.engine)
-        db_cols = {c["name"] for c in inspector.get_columns("feedback")}
+        if db.engine.dialect.name == "sqlite":
+            # pragma returns rows: (cid, name, type, notnull, dflt_value, pk)
+            rows = db.session.execute("PRAGMA table_info(feedback)").all()
+            db_cols = {r[1] for r in rows}
+        else:
+            inspector = db.inspect(db.engine)
+            db_cols = {c["name"] for c in inspector.get_columns("feedback")}
     except Exception:
         # fallback to model columns if inspection fails
         db_cols = {c.name for c in Feedback.__table__.columns}
