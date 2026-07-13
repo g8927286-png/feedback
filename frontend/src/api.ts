@@ -72,6 +72,16 @@ export function listFeedback(
   const query = params.toString() ? `?${params.toString()}` : "";
   return request<{ feedback: Feedback[]; total: number }>(`/feedback${query}`, {
     headers: { Authorization: `Bearer ${token}` },
+  }).then((data) => {
+    // Normalize audio URLs: backend returns "/uploads/xxx", so prefix with origin
+    const origin = API_BASE.replace(/\/api\/?$/, "");
+    data.feedback = data.feedback.map((f) => {
+      if ((f as any).audio_url && (f as any).audio_url.startsWith("/")) {
+        return { ...f, audio_url: `${origin}${(f as any).audio_url}` } as Feedback;
+      }
+      return f;
+    });
+    return data;
   });
 }
 
