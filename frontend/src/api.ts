@@ -39,6 +39,21 @@ export function submitFeedback(draft: FeedbackDraft) {
   });
 }
 
+export async function submitFeedbackForm(form: FormData) {
+  const res = await fetch(`${API_BASE}/feedback`, {
+    method: 'POST',
+    body: form,
+    // Do not set Content-Type — browser will add multipart boundary
+  })
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new ApiError(data.error || 'Ocorreu um erro. Tente novamente.', data.errors)
+  }
+
+  return res.json() as Promise<{ message: string; feedback: Feedback }> 
+}
+
 export function adminLogin(password: string) {
   return request<{ token: string; institution: string }>("/admin/login", {
     method: "POST",
