@@ -222,9 +222,22 @@ def create_feedback():
             audio_file.save(save_path)
             clean["audio_filename"] = unique
 
-    feedback = Feedback(**clean)
+    # Create model only with known columns (handles existing DB without migrations)
+    known_cols = {c.name for c in Feedback.__table__.columns}
+    model_kwargs = {k: v for k, v in clean.items() if k in known_cols}
+    feedback = Feedback(**model_kwargs)
     db.session.add(feedback)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        db.session.rollback()
+        return (
+            jsonify({"error": "Erro interno ao gravar feedback. Verifique os logs do servidor."}),
+            500,
+        )
 
     return jsonify({"message": "Obrigado pelo seu feedback!", "feedback": feedback.to_dict()}), 201
 
