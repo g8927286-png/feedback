@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: feedback-institucional-backend
+    env: python
+    branch: main
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: python backend/app.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: SECRET_KEY
+        value: "muda-esta-chave-em-producao"
+      - key: ADMIN_PASSWORD
+        value: "admin123"
+      - key: INSTITUTION_NAME
+        value: "Voz Institucional"
+
+  - type: static_site
+    name: feedback-institucional-frontend
+    env: node
+    branch: main
+    plan: free
+    buildCommand: cd frontend && npm install && npm run build
+    publishPath: frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        value: "https://<YOUR-BACKEND-NAME>.onrender.com/api"
