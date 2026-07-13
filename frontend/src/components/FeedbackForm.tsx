@@ -49,6 +49,10 @@ export default function FeedbackForm({ onSuccess, onError }: FeedbackFormProps) 
     event.preventDefault();
     setErrors({});
 
+    // Debugging: log current values to help trace validation issues
+    // eslint-disable-next-line no-console
+    console.log("[FeedbackForm] submit", { rating, message, messageLength: message.trim().length });
+
     const localErrors: Record<string, string> = {};
     if (!rating) localErrors.rating = "Escolha uma classificação de 1 a 5.";
     if (message.trim().length < 5) localErrors.message = "Escreva pelo menos alguns detalhes.";
